@@ -24,8 +24,7 @@ import type { FontFamily, FontSize, LabelStyle } from '../../context/ThemeContex
 import { Card } from '../common/Card';
 import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
-import { checkMongoHealth, syncStateToMongo, updateMongoUri } from '../../services/api';
-import type { MongoHealthResponse } from '../../services/api';
+
 
 // Preset Avatars (Scalable Vector Data URIs)
 const PRESET_AVATARS = [
@@ -75,49 +74,9 @@ export const SettingsView: React.FC = () => {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [copiedDataUri, setCopiedDataUri] = useState(false);
 
-  // MongoDB Connection Manager State
-  const [mongoHealth, setMongoHealth] = useState<MongoHealthResponse | null>(null);
-  const [customMongoUri, setCustomMongoUri] = useState<string>('mongodb+srv://admin:p0QXzmdPjfTFDP44@personaldashboard.p1cd2qf.mongodb.net/personalDashboard?retryWrites=true&w=majority');
-  const [isSyncingMongo, setIsSyncingMongo] = useState<boolean>(false);
-  const [mongoMsg, setMongoMsg] = useState<string | null>(null);
-
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const avatarMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const refreshMongoHealth = () => {
-    checkMongoHealth().then((h) => setMongoHealth(h));
-  };
-
-  useEffect(() => {
-    refreshMongoHealth();
-  }, []);
-
-  const handleManualSyncMongo = async () => {
-    setIsSyncingMongo(true);
-    const res = await syncStateToMongo(state);
-    setIsSyncingMongo(false);
-    if (res.success) {
-      setMongoMsg('✅ State successfully synchronized with MongoDB Atlas Cloud!');
-    } else {
-      setMongoMsg(`❌ Sync Error: ${res.error || 'Server unreachable'}`);
-    }
-    setTimeout(() => setMongoMsg(null), 4000);
-  };
-
-  const handleUpdateMongoUri = async () => {
-    if (!customMongoUri) return;
-    setIsSyncingMongo(true);
-    const res = await updateMongoUri(customMongoUri);
-    setIsSyncingMongo(false);
-    if (res.success) {
-      setMongoMsg('✅ Connected to MongoDB Atlas cluster successfully!');
-      refreshMongoHealth();
-    } else {
-      setMongoMsg(`❌ Connection Error: ${res.error || 'Check cluster connection string'}`);
-    }
-    setTimeout(() => setMongoMsg(null), 4000);
-  };
 
   // Close popup menus on click outside
   useEffect(() => {
@@ -336,88 +295,6 @@ export const SettingsView: React.FC = () => {
         </Card>
       )}
 
-      {/* SECTION 0: MONGODB ATLAS CLOUD DATABASE INTEGRATION CARD */}
-      <Card
-        title={
-          <span className="flex items-center gap-2">
-            <Database className="w-4 h-4 text-emerald-500" />
-            MongoDB Atlas Cloud Database
-          </span>
-        }
-        subtitle="Cloud database persistence cluster configuration"
-      >
-        <div className="space-y-4 p-1">
-          {/* Connection Status Indicator */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-[var(--bg-surface-subtle)] border border-[var(--border-main)] text-xs">
-            <div className="flex items-center gap-2.5">
-              <span className={`w-3 h-3 rounded-full shrink-0 ${mongoHealth?.dbConnected ? 'bg-emerald-500 animate-pulse shadow-sm' : 'bg-amber-500'}`} />
-              <div>
-                <div className="font-bold text-[var(--text-primary)]">
-                  {mongoHealth?.dbConnected ? 'MongoDB Atlas Cluster Connected 🟢' : 'Offline / Local Fallback Mode 🟡'}
-                </div>
-                <div className="text-[11px] text-[var(--text-muted)] font-mono mt-0.5">
-                  URI: {mongoHealth?.mongoUriMasked || 'mongodb+srv://admin:****@personaldashboard.p1cd2qf.mongodb.net/personalDashboard'}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={refreshMongoHealth}
-                icon={<RotateCcw className="w-3.5 h-3.5" />}
-              >
-                Check Health
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleManualSyncMongo}
-                disabled={isSyncingMongo}
-                icon={<Upload className="w-3.5 h-3.5" />}
-              >
-                {isSyncingMongo ? 'Syncing...' : 'Sync Cloud Now'}
-              </Button>
-            </div>
-          </div>
-
-          {/* Toast feedback */}
-          {mongoMsg && (
-            <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-600 dark:text-blue-400 text-xs font-bold animate-fadeIn">
-              {mongoMsg}
-            </div>
-          )}
-
-          {/* URI Connection String Manager Form */}
-          <div className="pt-2 border-t border-[var(--border-main)] space-y-2">
-            <label className="block text-xs font-bold text-[var(--text-secondary)]">
-              MongoDB Connection URI String:
-            </label>
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <input
-                type="text"
-                value={customMongoUri}
-                onChange={(e) => setCustomMongoUri(e.target.value)}
-                placeholder="mongodb+srv://<username>:<password>@cluster.mongodb.net/dbname"
-                className="px-3.5 py-2 rounded-xl bg-[var(--bg-surface-subtle)] border border-[var(--border-main)] text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] flex-1"
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleUpdateMongoUri}
-                disabled={isSyncingMongo}
-                icon={<Database className="w-3.5 h-3.5 text-emerald-500" />}
-              >
-                Connect Cluster
-              </Button>
-            </div>
-            <p className="text-[10px] text-[var(--text-muted)]">
-              Default URI connects securely to cluster <code className="font-mono text-[var(--accent-primary)]">personaldashboard.p1cd2qf.mongodb.net</code>. Changes persist automatically.
-            </p>
-          </div>
-        </div>
-      </Card>
 
       {/* SECTION 1: PROFILE PICTURE & AVATAR MANAGER CARD */}
       <Card title="Profile Picture & Avatar Options">

@@ -32,28 +32,37 @@ const DashboardModel = mongoose.model('DashboardState', dashboardSchema);
 let isDbConnected = false;
 let dbError = null;
 
+let cachedPromise = null;
+
 // Connect to MongoDB Atlas
 async function connectToMongo(uri) {
-  try {
-    if (mongoose.connection.readyState === 1) {
-      await mongoose.disconnect();
-    }
-    await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 8000
-    });
+  if (mongoose.connection.readyState === 1) {
     isDbConnected = true;
-    dbError = null;
-    currentMongoUri = uri;
-    console.log('✅ Successfully connected to MongoDB Atlas Cluster!');
-  } catch (err) {
-    isDbConnected = false;
-    dbError = err.message;
-    console.error('❌ MongoDB Connection Failure:', err.message);
+    return;
   }
+
+  if (!cachedPromise) {
+    cachedPromise = mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 8000
+    }).then(() => {
+      isDbConnected = true;
+      dbError = null;
+      currentMongoUri = uri;
+      console.log('✅ Successfully connected to MongoDB Atlas Cluster!');
+    }).catch((err) => {
+      isDbConnected = false;
+      dbError = err.message;
+      cachedPromise = null;
+      console.error('❌ MongoDB Connection Failure:', err.message);
+      throw err;
+    });
+  }
+
+  await cachedPromise;
 }
 
 // Initial Connection
-connectToMongo(currentMongoUri);
+connectToMongo(currentMongoUri).catch(() => {});
 
 // API 1: Health & Connection Status
 app.get('/api/health', (req, res) => {
@@ -71,16 +80,14 @@ app.get('/api/health', (req, res) => {
 // API 2: Fetch State from MongoDB Atlas
 app.get('/api/dashboard', async (req, res) => {
   try {
-    if (!isDbConnected) {
-      return res.status(503).json({ error: 'MongoDB Atlas disconnected', dbConnected: false });
-    }
+    await connectToMongo(currentMongoUri);
     let doc = await DashboardModel.findOne({ userId: 'default_user' });
     if (!doc) {
       return res.json({ state: null, message: 'No remote document yet' });
     }
     res.json({ state: doc.state, updatedAt: doc.updatedAt });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, dbConnected: false });
   }
 });
 
@@ -91,9 +98,8 @@ app.post('/api/dashboard/sync', async (req, res) => {
     if (!state) {
       return res.status(400).json({ error: 'Missing state payload' });
     }
-    if (!isDbConnected) {
-      return res.status(503).json({ error: 'MongoDB Atlas is not connected', dbConnected: false });
-    }
+
+    await connectToMongo(currentMongoUri);
 
     const doc = await DashboardModel.findOneAndUpdate(
       { userId: 'default_user' },
@@ -107,7 +113,7 @@ app.post('/api/dashboard/sync', async (req, res) => {
       message: 'State synchronized with MongoDB Atlas cloud successfully'
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, dbConnected: false });
   }
 });
 
@@ -129,7 +135,12 @@ app.post('/api/db-config', async (req, res) => {
   }
 });
 
-// Start Express Server
-app.listen(PORT, () => {
-  console.log(`🚀 Personal OS Backend Server running on http://localhost:${PORT}`);
-});
+// Start Express Server (only if not running in Vercel serverless environment)
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Personal OS Backend Server running on http://localhost:${PORT}`);
+  });
+}
+
+// Export the app for Vercel serverless functions
+export default app;
