@@ -101,7 +101,7 @@ app.get('/api/health', async (req, res) => {
       dbConnected: true,
       error: null
     });
-  } catch (err: any) {
+  } catch (err) {
     res.json({
       status: 'disconnected',
       readyState: mongoose.connection.readyState,
@@ -120,7 +120,7 @@ app.get('/api/dashboard', async (req, res) => {
       return res.json({ state: null, message: 'No remote document yet' });
     }
     res.json({ state: doc.state, updatedAt: doc.updatedAt });
-  } catch (err: any) {
+  } catch (err) {
     res.status(500).json({ error: err?.message || 'Failed to retrieve remote state', dbConnected: false });
   }
 });
@@ -146,7 +146,7 @@ app.post('/api/dashboard/sync', async (req, res) => {
       updatedAt: doc.updatedAt,
       message: 'State synchronized with MongoDB Atlas cloud successfully'
     });
-  } catch (err: any) {
+  } catch (err) {
     res.status(500).json({ error: err?.message || 'Failed to synchronize state', dbConnected: false });
   }
 });
