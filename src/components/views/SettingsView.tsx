@@ -24,6 +24,7 @@ import type { FontFamily, FontSize, LabelStyle } from '../../context/ThemeContex
 import { Card } from '../common/Card';
 import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
+import { checkMongoHealth, syncStateToMongo, updateMongoUri } from '../../services/api';
 
 
 // Preset Avatars (Scalable Vector Data URIs)
@@ -77,6 +78,61 @@ export const SettingsView: React.FC = () => {
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const avatarMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // MongoDB State & Management
+  const [mongoUriInput, setMongoUriInput] = useState('mongodb+srv://supermayu017_db_user:p0QXzmdPjfTFDP44@personaldashboard.p1cd2qf.mongodb.net/personalDashboard?retryWrites=true&w=majority&appName=personalDashboard');
+  const [mongoHealth, setMongoHealth] = useState<{ status: string; dbConnected: boolean; error?: string | null; maskedUri?: string }>({ status: 'checking', dbConnected: false });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isConnectingMongo, setIsConnectingMongo] = useState(false);
+  const [mongoToast, setMongoToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const refreshMongoHealth = () => {
+    checkMongoHealth().then((res) => {
+      setMongoHealth({
+        status: res.status,
+        dbConnected: res.dbConnected,
+        error: res.error,
+        maskedUri: res.mongoUriMasked
+      });
+    });
+  };
+
+  useEffect(() => {
+    refreshMongoHealth();
+    const interval = setInterval(refreshMongoHealth, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleConnectMongo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mongoUriInput.trim()) return;
+    setIsConnectingMongo(true);
+    setMongoToast(null);
+
+    const res = await updateMongoUri(mongoUriInput.trim());
+    setIsConnectingMongo(false);
+    if (res.success) {
+      setMongoToast({ type: 'success', message: 'Successfully connected to MongoDB Atlas!' });
+      refreshMongoHealth();
+      syncStateToMongo(store.getState());
+    } else {
+      setMongoToast({ type: 'error', message: res.error || 'Failed to connect to MongoDB Atlas' });
+      refreshMongoHealth();
+    }
+  };
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    setMongoToast(null);
+    const res = await syncStateToMongo(store.getState());
+    setIsSyncing(false);
+    if (res.success) {
+      setMongoToast({ type: 'success', message: 'All dashboard data & files synchronized to MongoDB Atlas successfully!' });
+      refreshMongoHealth();
+    } else {
+      setMongoToast({ type: 'error', message: res.error || 'Sync failed' });
+    }
+  };
 
   // Close popup menus on click outside
   useEffect(() => {
@@ -295,6 +351,87 @@ export const SettingsView: React.FC = () => {
         </Card>
       )}
 
+
+      {/* SECTION: MONGODB ATLAS CLOUD DATABASE CONFIGURATION */}
+      <Card
+        title={
+          <span className="flex items-center gap-2">
+            <Database className="w-5 h-5 text-emerald-500" />
+            MongoDB Atlas Cloud Database Connection
+          </span>
+        }
+      >
+        <div className="space-y-4">
+          {/* Connection Status Badge & Diagnostics */}
+          <div className="p-4 rounded-xl bg-[var(--bg-surface-subtle)] border border-[var(--border-main)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className={`w-3 h-3 rounded-full ${mongoHealth.dbConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                <h4 className="text-sm font-bold text-[var(--text-primary)]">
+                  Status: {mongoHealth.dbConnected ? 'Connected to MongoDB Atlas 🟢' : 'Connecting / Fallback Mode 🟡'}
+                </h4>
+              </div>
+              <p className="text-xs text-[var(--text-muted)] mt-1 font-mono">
+                {mongoHealth.maskedUri || 'mongodb+srv://admin:****@personaldashboard.p1cd2qf.mongodb.net/personalDashboard'}
+              </p>
+              {mongoHealth.error && (
+                <div className="mt-2 text-xs font-semibold text-rose-500 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
+                  ⚠️ Error Notice: {mongoHealth.error}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 self-start sm:self-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                icon={<RotateCcw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />}
+              >
+                {isSyncing ? 'Syncing...' : 'Sync Now to MongoDB'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Mongo Toast Alert */}
+          {mongoToast && (
+            <div className={`p-3 rounded-xl text-xs font-bold flex items-center justify-between animate-fadeIn ${
+              mongoToast.type === 'success'
+                ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                : 'bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400'
+            }`}>
+              <span>{mongoToast.message}</span>
+              <button onClick={() => setMongoToast(null)} className="text-xs underline">Dismiss</button>
+            </div>
+          )}
+
+          {/* Form to Update MongoDB URI */}
+          <form onSubmit={handleConnectMongo} className="space-y-3 pt-2">
+            <div>
+              <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">
+                MongoDB Connection String (MONGODB_URI)
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  required
+                  value={mongoUriInput}
+                  onChange={(e) => setMongoUriInput(e.target.value)}
+                  placeholder="mongodb+srv://user:pass@cluster.mongodb.net/dbname"
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-[var(--bg-surface-subtle)] border border-[var(--border-main)] text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)]"
+                />
+                <Button variant="primary" size="sm" type="submit" disabled={isConnectingMongo}>
+                  {isConnectingMongo ? 'Connecting...' : 'Connect to MongoDB'}
+                </Button>
+              </div>
+            </div>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              💡 All information entries (tasks, projects, notes, journal, goals) and file uploads (certificates, PDFs, documents) are instantly backed up to this MongoDB Atlas cluster.
+            </p>
+          </form>
+        </div>
+      </Card>
 
       {/* SECTION 1: PROFILE PICTURE & AVATAR MANAGER CARD */}
       <Card title="Profile Picture & Avatar Options">

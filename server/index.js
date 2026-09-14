@@ -4,6 +4,14 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dns from 'dns';
+
+// Fallback DNS servers to ensure reliable resolution of mongodb+srv:// SRV records on Windows
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch (e) {
+  console.warn('DNS server override notice:', e.message);
+}
 
 dotenv.config();
 
@@ -12,10 +20,11 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-let currentMongoUri = process.env.MONGODB_URI || 'mongodb+srv://admin:p0QXzmdPjfTFDP44@personaldashboard.p1cd2qf.mongodb.net/personalDashboard?retryWrites=true&w=majority';
+let currentMongoUri = process.env.MONGODB_URI || 'mongodb+srv://supermayu017_db_user:p0QXzmdPjfTFDP44@personaldashboard.p1cd2qf.mongodb.net/personalDashboard?retryWrites=true&w=majority&appName=personalDashboard';
 
 app.use(cors());
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Mongoose Schema for Dashboard State
 const dashboardSchema = new mongoose.Schema(
@@ -31,23 +40,27 @@ const DashboardModel = mongoose.model('DashboardState', dashboardSchema);
 
 let isDbConnected = false;
 let dbError = null;
-
 let cachedPromise = null;
 
 // Connect to MongoDB Atlas
 async function connectToMongo(uri) {
-  if (mongoose.connection.readyState === 1) {
+  if (mongoose.connection.readyState === 1 && currentMongoUri === uri) {
     isDbConnected = true;
     return;
   }
 
+  if (mongoose.connection.readyState !== 0 && currentMongoUri !== uri) {
+    await mongoose.disconnect();
+    cachedPromise = null;
+  }
+
   if (!cachedPromise) {
+    currentMongoUri = uri;
     cachedPromise = mongoose.connect(uri, {
       serverSelectionTimeoutMS: 8000
     }).then(() => {
       isDbConnected = true;
       dbError = null;
-      currentMongoUri = uri;
       console.log('✅ Successfully connected to MongoDB Atlas Cluster!');
     }).catch((err) => {
       isDbConnected = false;

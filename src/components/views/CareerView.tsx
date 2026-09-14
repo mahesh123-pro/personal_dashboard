@@ -49,6 +49,7 @@ export const CareerView: React.FC = () => {
   // Resume Form State
   const [resumeTitle, setResumeTitle] = useState('');
   const [resumeUrl, setResumeUrl] = useState('');
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
 
   // ----------------------------------------------------
   // AUTOMATIC CAREER READINESS & APPLICATION ENGINE
@@ -167,18 +168,46 @@ export const CareerView: React.FC = () => {
     setIsJobModalOpen(false);
   };
 
-  const handleAddResumeSubmit = (e: React.FormEvent) => {
+  const handleAddResumeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resumeTitle.trim() || !resumeUrl.trim()) return;
+    if (!resumeTitle.trim() && !resumeFile) return;
+
+    let finalUrl = resumeUrl.trim();
+    if (resumeFile) {
+      try {
+        finalUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(resumeFile);
+        });
+      } catch (err) {
+        console.error('Failed to read resume file:', err);
+      }
+    }
+
+    if (!finalUrl && !resumeUrl.trim()) return;
+
+    const title = resumeTitle.trim() || (resumeFile ? resumeFile.name : 'Untitled Resume');
 
     store.addResume({
-      title: resumeTitle.trim(),
-      url: resumeUrl.trim(),
+      title,
+      url: finalUrl,
       lastUpdated: todayStr
+    });
+
+    // Also index in Files Center for unified MongoDB document backup
+    store.addDocument({
+      name: title.toLowerCase().endsWith('.pdf') ? title : `${title}.pdf`,
+      category: 'resume',
+      fileSize: resumeFile ? `${(resumeFile.size / 1024).toFixed(0)} KB` : '1.2 MB',
+      tags: ['resume', 'career'],
+      url: finalUrl
     });
 
     setResumeTitle('');
     setResumeUrl('');
+    setResumeFile(null);
     setIsResumeModalOpen(false);
   };
 
@@ -737,13 +766,40 @@ export const CareerView: React.FC = () => {
               value={resumeTitle}
               onChange={(e) => setResumeTitle(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-main)] text-xs text-[var(--text-primary)] focus:outline-none"
-              required
             />
           </div>
 
           <div>
             <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">
-              PDF Link / Drive URL
+              Upload Resume PDF / Document File
+            </label>
+            <input
+              type="file"
+              accept=".pdf,.doc,.docx"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  setResumeFile(e.target.files[0]);
+                  if (!resumeTitle) setResumeTitle(e.target.files[0].name.replace(/\.[^/.]+$/, ""));
+                }
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-surface-subtle)] border border-[var(--border-main)] text-xs text-[var(--text-primary)] focus:outline-none"
+            />
+            {resumeFile && (
+              <p className="text-[10px] text-emerald-500 font-semibold mt-1">
+                Selected: {resumeFile.name} ({(resumeFile.size / 1024).toFixed(0)} KB)
+              </p>
+            )}
+          </div>
+
+          <div className="relative flex py-1 items-center">
+            <div className="flex-grow border-t border-[var(--border-main)]"></div>
+            <span className="flex-shrink mx-2 text-[10px] uppercase font-bold text-[var(--text-muted)]">or specify web / drive link</span>
+            <div className="flex-grow border-t border-[var(--border-main)]"></div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-[var(--text-secondary)] mb-1">
+              PDF Link / Drive URL (Optional if file uploaded)
             </label>
             <input
               type="url"
@@ -751,7 +807,6 @@ export const CareerView: React.FC = () => {
               value={resumeUrl}
               onChange={(e) => setResumeUrl(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-main)] text-xs text-[var(--text-primary)] focus:outline-none"
-              required
             />
           </div>
 
