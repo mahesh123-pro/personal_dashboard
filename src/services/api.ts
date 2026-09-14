@@ -4,7 +4,6 @@ export interface MongoHealthResponse {
   status: 'connected' | 'disconnected';
   readyState: number;
   dbConnected: boolean;
-  mongoUriMasked?: string;
   error?: string | null;
 }
 
@@ -68,23 +67,6 @@ export const syncStateToMongo = async (state: DashboardState): Promise<{ success
     }
     const data = await safeParseJson(res);
     return { success: true, updatedAt: data.updatedAt };
-  } catch (err: any) {
-    return { success: false, error: err.message };
-  }
-};
-
-export const updateMongoUri = async (mongoUri: string): Promise<{ success: boolean; error?: string }> => {
-  try {
-    const res = await fetch('/api/db-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mongoUri })
-    });
-    const data = await safeParseJson(res);
-    if (!res.ok || !data.success) {
-      return { success: false, error: data.error || 'Failed to connect to MongoDB Atlas' };
-    }
-    return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
   }

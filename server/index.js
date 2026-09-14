@@ -20,7 +20,20 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-let currentMongoUri = process.env.MONGODB_URI || 'mongodb+srv://supermayu017_db_user:p0QXzmdPjfTFDP44@personaldashboard.p1cd2qf.mongodb.net/personalDashboard?retryWrites=true&w=majority&appName=personalDashboard';
+const currentMongoUri = process.env.MONGODB_URI || 'mongodb+srv://supermayu017_db_user:p0QXzmdPjfTFDP44@personaldashboard.p1cd2qf.mongodb.net/personalDashboard?retryWrites=true&w=majority&appName=personalDashboard';
+
+// Hardened Security Configuration
+app.disable('x-powered-by');
+
+// Security Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -44,18 +57,12 @@ let cachedPromise = null;
 
 // Connect to MongoDB Atlas
 async function connectToMongo(uri) {
-  if (mongoose.connection.readyState === 1 && currentMongoUri === uri) {
+  if (mongoose.connection.readyState === 1) {
     isDbConnected = true;
     return;
   }
 
-  if (mongoose.connection.readyState !== 0 && currentMongoUri !== uri) {
-    await mongoose.disconnect();
-    cachedPromise = null;
-  }
-
   if (!cachedPromise) {
-    currentMongoUri = uri;
     cachedPromise = mongoose.connect(uri, {
       serverSelectionTimeoutMS: 8000
     }).then(() => {
@@ -77,16 +84,14 @@ async function connectToMongo(uri) {
 // Initial Connection
 connectToMongo(currentMongoUri).catch(() => {});
 
-// API 1: Health & Connection Status
+// API 1: Secure Health & Connection Status (No credentials exposed)
 app.get('/api/health', (req, res) => {
   const connectionState = mongoose.connection.readyState;
-  // readyState: 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
   res.json({
     status: isDbConnected ? 'connected' : 'disconnected',
     readyState: connectionState,
     dbConnected: isDbConnected,
-    mongoUriMasked: currentMongoUri.replace(/:([^@]+)@/, ':****@'),
-    error: dbError
+    error: isDbConnected ? null : (dbError ? 'Database connection issue' : 'Disconnected')
   });
 });
 
@@ -100,7 +105,7 @@ app.get('/api/dashboard', async (req, res) => {
     }
     res.json({ state: doc.state, updatedAt: doc.updatedAt });
   } catch (err) {
-    res.status(500).json({ error: err.message, dbConnected: false });
+    res.status(500).json({ error: 'Failed to retrieve remote state', dbConnected: false });
   }
 });
 
@@ -126,25 +131,7 @@ app.post('/api/dashboard/sync', async (req, res) => {
       message: 'State synchronized with MongoDB Atlas cloud successfully'
     });
   } catch (err) {
-    res.status(500).json({ error: err.message, dbConnected: false });
-  }
-});
-
-// API 4: Dynamically Update & Re-connect MongoDB URI
-app.post('/api/db-config', async (req, res) => {
-  try {
-    const { mongoUri } = req.body;
-    if (!mongoUri) {
-      return res.status(400).json({ error: 'Missing mongoUri parameter' });
-    }
-    await connectToMongo(mongoUri);
-    if (isDbConnected) {
-      res.json({ success: true, message: 'Connected to MongoDB Atlas successfully!' });
-    } else {
-      res.status(400).json({ success: false, error: dbError });
-    }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to synchronize state', dbConnected: false });
   }
 });
 
