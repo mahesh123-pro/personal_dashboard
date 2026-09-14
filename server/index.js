@@ -6,11 +6,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dns from 'dns';
 
-// Fallback DNS servers to ensure reliable resolution of mongodb+srv:// SRV records on Windows
-try {
-  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
-} catch (e) {
-  console.warn('DNS server override notice:', e.message);
+// Fallback DNS servers for Windows dev environment
+if (process.platform === 'win32') {
+  try {
+    dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+  } catch (e) {
+    console.warn('DNS server override notice:', e.message);
+  }
 }
 
 dotenv.config();
@@ -20,7 +22,11 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const currentMongoUri = process.env.MONGODB_URI || 'mongodb+srv://supermayu017_db_user:p0QXzmdPjfTFDP44@personaldashboard.p1cd2qf.mongodb.net/personalDashboard?retryWrites=true&w=majority&appName=personalDashboard';
+const defaultMongoUri = 'mongodb+srv://supermayu017_db_user:p0QXzmdPjfTFDP44@personaldashboard.p1cd2qf.mongodb.net/personalDashboard?retryWrites=true&w=majority&appName=personalDashboard';
+
+function getMongoUri() {
+  return process.env.MONGODB_URI || defaultMongoUri;
+}
 
 // Hardened Security Configuration
 app.disable('x-powered-by');
@@ -59,6 +65,7 @@ let cachedPromise = null;
 async function connectToMongo(uri) {
   if (mongoose.connection.readyState === 1) {
     isDbConnected = true;
+    dbError = null;
     return;
   }
 
@@ -81,31 +88,40 @@ async function connectToMongo(uri) {
   await cachedPromise;
 }
 
-// Initial Connection
-connectToMongo(currentMongoUri).catch(() => {});
+// Initial Connection attempt
+connectToMongo(getMongoUri()).catch(() => {});
 
-// API 1: Secure Health & Connection Status (No credentials exposed)
-app.get('/api/health', (req, res) => {
-  const connectionState = mongoose.connection.readyState;
-  res.json({
-    status: isDbConnected ? 'connected' : 'disconnected',
-    readyState: connectionState,
-    dbConnected: isDbConnected,
-    error: isDbConnected ? null : (dbError ? 'Database connection issue' : 'Disconnected')
-  });
+// API 1: Health & Connection Status (Awaits connection for serverless Vercel accuracy)
+app.get('/api/health', async (req, res) => {
+  try {
+    await connectToMongo(getMongoUri());
+    res.json({
+      status: 'connected',
+      readyState: mongoose.connection.readyState,
+      dbConnected: true,
+      error: null
+    });
+  } catch (err: any) {
+    res.json({
+      status: 'disconnected',
+      readyState: mongoose.connection.readyState,
+      dbConnected: false,
+      error: err?.message || 'Database connection error'
+    });
+  }
 });
 
 // API 2: Fetch State from MongoDB Atlas
 app.get('/api/dashboard', async (req, res) => {
   try {
-    await connectToMongo(currentMongoUri);
+    await connectToMongo(getMongoUri());
     let doc = await DashboardModel.findOne({ userId: 'default_user' });
     if (!doc) {
       return res.json({ state: null, message: 'No remote document yet' });
     }
     res.json({ state: doc.state, updatedAt: doc.updatedAt });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to retrieve remote state', dbConnected: false });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to retrieve remote state', dbConnected: false });
   }
 });
 
@@ -117,7 +133,7 @@ app.post('/api/dashboard/sync', async (req, res) => {
       return res.status(400).json({ error: 'Missing state payload' });
     }
 
-    await connectToMongo(currentMongoUri);
+    await connectToMongo(getMongoUri());
 
     const doc = await DashboardModel.findOneAndUpdate(
       { userId: 'default_user' },
@@ -130,8 +146,8 @@ app.post('/api/dashboard/sync', async (req, res) => {
       updatedAt: doc.updatedAt,
       message: 'State synchronized with MongoDB Atlas cloud successfully'
     });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to synchronize state', dbConnected: false });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to synchronize state', dbConnected: false });
   }
 });
 
